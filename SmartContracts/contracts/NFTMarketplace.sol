@@ -11,6 +11,7 @@ import "@openzeppelin/contracts/token/ERC721/utils/ERC721Holder.sol";
  error InvalidAmount();
  error AlreadyListed();
  error TransferFailed();
+ error AlreadyOffered();
  
  contract NFTMarketplace is ERC721Holder{
     address public  owner;
@@ -24,12 +25,12 @@ import "@openzeppelin/contracts/token/ERC721/utils/ERC721Holder.sol";
     }
 
     mapping (address => mapping(uint256 => Listing)) public listings;
+    mapping (address => mapping(uint256 => mapping(address => uint256 ))) public offers;
 
     event ListingCreated(address indexed seller,
      address indexed nft,
      uint256 tokenId, 
     uint256 price );
-
     event ListingCancelled(address indexed seller,
      address nft,
      uint256 tokenId);
@@ -41,6 +42,14 @@ import "@openzeppelin/contracts/token/ERC721/utils/ERC721Holder.sol";
      uint256 price);
 
     event FeeWithdrawn(address indexed owner, uint256 amount);
+    event OfferCreated(address indexed buyer,
+     address indexed nft,
+     uint256 tokenId,
+     uint256 amount);
+    event OfferCancelled(address indexed buyer,
+    address indexed nft,
+    uint256 tokenId,
+    uint256 amtToRefund);
 
      constructor(){
         owner = msg.sender;
@@ -107,6 +116,31 @@ import "@openzeppelin/contracts/token/ERC721/utils/ERC721Holder.sol";
 
         emit FeeWithdrawn(msg.sender, feeAmt);
     }
+
+    function makeOffer(address _nft, uint256 _tokenId) external payable {
+        Listing memory listing = listings[_nft][_tokenId];        
+        if(listing.price == 0 ){ revert NotActive(); }
+        if(msg.value == 0) {revert InvalidAmount(); }
+        if(offers[_nft][_tokenId][msg.sender] > 0 ) { revert AlreadyOffered(); }
+
+        offers[_nft][_tokenId][msg.sender] = msg.value;
+
+        emit OfferCreated(msg.sender, _nft, _tokenId, msg.value);
+    }
+
+    function cancelOffer(address _nft, uint256 _tokenId) external {
+        uint256 amtToRefund = offers[_nft][_tokenId][msg.sender];
+        if(amtToRefund == 0 ) {revert InvalidAmount(); } 
+
+        delete offers[_nft][_tokenId][msg.sender];
+
+        (bool ok,) = msg.sender.call{value: amtToRefund}("");
+        if (!ok ) {revert TransferFailed(); }
+
+        emit OfferCancelled(msg.sender, _nft, _tokenId, amtToRefund);
+    }
+
+    
 
 
 }
