@@ -12,6 +12,8 @@ import "@openzeppelin/contracts/token/ERC721/utils/ERC721Holder.sol";
  error AlreadyListed();
  error TransferFailed();
  error AlreadyOffered();
+ error OfferNotAvailable();
+ error NftNotAvailable();
  
  contract NFTMarketplace is ERC721Holder{
     address public  owner;
@@ -46,10 +48,16 @@ import "@openzeppelin/contracts/token/ERC721/utils/ERC721Holder.sol";
      address indexed nft,
      uint256 tokenId,
      uint256 amount);
+    
     event OfferCancelled(address indexed buyer,
     address indexed nft,
     uint256 tokenId,
     uint256 amtToRefund);
+    event OfferAccpected(address indexed seller,
+    address indexed buyer,
+    address indexed nft,
+    uint256 tokenId,
+    uint256 amount);
 
      constructor(){
         owner = msg.sender;
@@ -138,6 +146,30 @@ import "@openzeppelin/contracts/token/ERC721/utils/ERC721Holder.sol";
         if (!ok ) {revert TransferFailed(); }
 
         emit OfferCancelled(msg.sender, _nft, _tokenId, amtToRefund);
+    }
+
+    function accpectOffer(address _nft, uint256 _tokenId, address _buyer) external {
+     Listing memory listing = listings[_nft][_tokenId];
+     IERC721 nft = IERC721(_nft);
+     uint256 offerAmt = offers[_nft][_tokenId][_buyer];
+      if( listing.price == 0 ) {revert NotActive(); }
+      if(offerAmt == 0 ){revert OfferNotAvailable(); }
+      if (listing.seller != msg.sender) {revert NotOwner(); }
+      if ( nft.ownerOf(_tokenId) != address(this)) { revert NftNotAvailable(); }
+
+      uint256 fee = (offerAmt * feePercent) / BASIS_POINTS;
+      uint256 amtAfterFee = offerAmt - fee; 
+
+      delete listings[_nft][_tokenId];
+      delete offers[_nft][_tokenId][_buyer];
+      totalFee += fee;      
+      
+      nft.safeTransferFrom(address(this), _buyer, _tokenId);
+
+      (bool ok,) = msg.sender.call{value: amtAfterFee}("");
+      if ( !ok ) { revert TransferFailed(); }
+
+      emit OfferAccpected(msg.sender, _buyer, _nft, _tokenId, offerAmt);
     }
 
     
