@@ -14,6 +14,8 @@ import "@openzeppelin/contracts/token/ERC721/utils/ERC721Holder.sol";
  error AlreadyOffered();
  error OfferNotAvailable();
  error NftNotAvailable();
+ error invalidDuration();
+ error AlreadyAuctioned();
  
  contract NFTMarketplace is ERC721Holder{
     address public  owner;
@@ -26,8 +28,17 @@ import "@openzeppelin/contracts/token/ERC721/utils/ERC721Holder.sol";
         uint96 price;  
     }
 
+    struct Auction {
+        uint64 endTime;
+        address seller;
+        address highestBidder;
+        uint256 startingPrice;
+        uint256 higestBid;
+    }
+
     mapping (address => mapping(uint256 => Listing)) public listings;
     mapping (address => mapping(uint256 => mapping(address => uint256 ))) public offers;
+    mapping (address => mapping(uint256 => Auction)) public auctions;
 
     event ListingCreated(address indexed seller,
      address indexed nft,
@@ -170,6 +181,21 @@ import "@openzeppelin/contracts/token/ERC721/utils/ERC721Holder.sol";
       if ( !ok ) { revert TransferFailed(); }
 
       emit OfferAccpected(msg.sender, _buyer, _nft, _tokenId, offerAmt);
+    }
+
+    function createAuction(address _nft, uint256 _tokenId, uint256 _startingPrice, uint64 _duration) external {
+        if(_startingPrice == 0 ) {revert InvalidPrice(); }
+        if(_duration == 0 ) {revert invalidDuration();}
+        IERC721 nft = IERC721(_nft);
+        Listing memory listing = listings[_nft][_tokenId];
+        Auction memory auction = auctions[_nft][_tokenId];
+        if(nft.ownerOf(_tokenId) != msg.sender) {revert NftNotAvailable(); }
+        if(listing.price > 0) {revert AlreadyListed();}
+        if(auction.startPrice > 0) {revert AlreadyAuctioned(); }
+
+    uint64 endTime = _duration + block.timestamp;
+    auctions[_nft][_tokenId] = Auction({endTime: endTime, seller: msg.sender, highestBider: address(0), startPrice: _startingPrice, higestBid: 0});;
+    nft.safeTransferFrom(msg.sender, address(this), _tokenId);
     }
 
     
