@@ -18,7 +18,8 @@ import "@openzeppelin/contracts/token/ERC721/utils/ERC721Holder.sol";
  error AuctionNotexist();
  error LowBid();
  error UnAuthorized();
- error AuctionEnded();
+ error AuctionClosed();
+ error NotEnded();
  
  contract NFTMarketplace is ERC721Holder{
     address public  owner;
@@ -73,20 +74,21 @@ import "@openzeppelin/contracts/token/ERC721/utils/ERC721Holder.sol";
     address indexed nft,
     uint256 tokenId,
     uint256 amount);
-    event AuctionCreated(address indexed seller, address indexed nft, uint256 tokenId,uint256 startingPrice, uint64 endAt,);
-    event BidPlaced(address indexed Bider, address indexed nft, uint256 tokenId, uint256 bid);
-     
+    event AuctionCreated(address indexed seller, address indexed nft, uint256 tokenId,uint256 startingPrice, uint64 endAt);
+    event BidPlaced(address indexed bider, address indexed nft, uint256 tokenId, uint256 bid);
+    event AuctionEnded(address indexed seller, address indexed winner, address indexed nft, uint256 tokenId, uint256 highestBid);
+    event AuctionEthWithdrawn(address indexed bidder, uint256 amount);
     constructor(){
         owner = msg.sender;
-     }
+    }
 
-     modifier onlyOwner() {
+    modifier onlyOwner() {
         if (owner != msg.sender) { revert UnAuthorized(); }
         _;
-     }
+    }
 
     function listNFT(address _nft, uint256 _tokenId, uint96 _price) external {
-       IERC721 nft = IERC721(_nft);
+        IERC721 nft = IERC721(_nft);
         if(msg.sender != nft.ownerOf(_tokenId)) { revert UnAuthorized(); }
         if(_price == 0) { revert InvalidPrice(); }   
         Listing memory listing = listings[_nft][_tokenId];
@@ -199,11 +201,11 @@ import "@openzeppelin/contracts/token/ERC721/utils/ERC721Holder.sol";
         if(listing.price > 0) {revert AlreadyListed();}
         if(auction.startingPrice > 0) {revert AlreadyAuctioned(); }
 
-    uint64 endTime = _duration + block.timestamp;
-    auctions[_nft][_tokenId] = Auction({endTime: endTime, seller: msg.sender, highestBidder: address(0), startingPrice: _startingPrice, highestBid: 0});
-    nft.safeTransferFrom(msg.sender, address(this), _tokenId);
+        uint64 endTime = uint64(_duration + block.timestamp);
+         auctions[_nft][_tokenId] = Auction({endTime: endTime, seller: msg.sender, highestBidder: address(0), startingPrice: _startingPrice, highestBid: 0});
+         nft.safeTransferFrom(msg.sender, address(this), _tokenId);
 
-    emit AuctionCreated(msg.sender, _nft, _tokenId, auction.startingPrice, endTime)
+         emit AuctionCreated(msg.sender, _nft, _tokenId, auction.startingPrice, endTime);
     }
 
     function placeBid(address _nft, uint256 _tokenId) external payable {
@@ -212,7 +214,7 @@ import "@openzeppelin/contracts/token/ERC721/utils/ERC721Holder.sol";
         if(msg.value < auction.startingPrice ) {revert LowBid();}
         if(msg.value <= auction.highestBid) {revert LowBid(); }
         if(msg.sender == auction.seller) { revert UnAuthorized(); }
-        if(block.timestamp >= auction.endTime) {revert AuctionEnded(); }
+        if(block.timestamp >= auction.endTime) {revert AuctionClosed(); }
 
         uint256 prevHighestBid = auction.highestBid;
         address prevHighestBidder = auction.highestBidder;
@@ -224,6 +226,44 @@ import "@openzeppelin/contracts/token/ERC721/utils/ERC721Holder.sol";
         auction.highestBid = msg.value;
 
         emit BidPlaced(msg.sender, _nft, _tokenId, msg.value);
+    }
+
+    function endAuction(address _nft, uint256 _tokenId) external {
+        Auction memory auction = auctions[_nft][_tokenId];
+        IERC721 nft = IERC721(_nft);
+        address seller = auction.seller;
+        if(auction.startingPrice == 0){revert AuctionNotexist();}
+        if(auction.endTime > block.timestamp) {revert NotEnded();}
+        if(seller != msg.sender) {revert UnAuthorized(); }
+
+        address winner = auction.highestBidder;
+
+
+        if(winner != address(0)) {
+        uint256 fee = (auction.highestBid * feePercent) / BASIS_POINTS;
+        uint256 amtAfterFee = auction.highestBid - fee;
+        totalFee += fee;
+
+         delete auctions[_nft][_tokenId];
+         nft.safeTransferFrom(address(this), winner, _tokenId);
+         (bool ok,) = seller.call{value: amtAfterFee}("");
+         if(!ok) {revert TransferFailed();} }
+        else {
+            delete auctions[_nft][_tokenId];
+            nft.safeTransferFrom(address(this), seller , _tokenId);
+        } 
+        emit AuctionEnded(seller, winner, _nft, _tokenId, auction.highestBid);
+    }
+
+    function withdrawAuctionEth() external {
+        if(pendingWithdrawls[msg.sender] == 0) {revert InvalidAmount(); }
+        uint256 amountToSend = pendingWithdrawls[msg.sender];
+        pendingWithdrawls[msg.sender] = 0;
+
+        (bool ok,) = msg.sender.call{value: amountToSend}("");
+        if(!ok){revert TransferFailed(); }
+
+        emit AuctionEthWithdrawn(msg.sender, amountToSend);
     }
 
 
