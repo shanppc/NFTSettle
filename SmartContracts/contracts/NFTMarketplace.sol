@@ -205,7 +205,7 @@ import "@openzeppelin/contracts/token/ERC721/utils/ERC721Holder.sol";
          auctions[_nft][_tokenId] = Auction({endTime: endTime, seller: msg.sender, highestBidder: address(0), startingPrice: _startingPrice, highestBid: 0});
          nft.safeTransferFrom(msg.sender, address(this), _tokenId);
 
-         emit AuctionCreated(msg.sender, _nft, _tokenId, auction.startingPrice, endTime);
+         emit AuctionCreated(msg.sender, _nft, _tokenId, _startingPrice, endTime);
     }
 
     function placeBid(address _nft, uint256 _tokenId) external payable {
